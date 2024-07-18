@@ -20,55 +20,134 @@ page: 2
 ---
 # 개발 과정 소개
 
-### 의도 데이터 정리
-- 기상청 데이터 가져오고 어쩌고
-- 오늘 내일 어제 다음주 지난주 어제 등등...
+### 의도 추출 방법
+- 키워드 기반 (BM25) 우선 시도 
+- 사용자 질의 키워드가 유사질의에 많이 매칭되는 문서를 찾음
 
 <br>
-<hr>
+
+### 날씨 의도 정의
+- 의도 : 날씨 > 오늘/내일/어제/이번주/저번주/어제/그저께/모레
+- 유사질의 예) 날씨 > 오늘 : "날씨", "오늘 날씨 어때?", "현재 날씨 알려줘", "현재 기온" ... 
+
 <br>
 
-### 암튼 열심히 했음
-- 그러나 기상청 단기예보 API 의 한계에서...
-- 의도 분석 내용이 축소 돼버렸고...
-
-
+### 필요 개체명 정의 
+- 기상청 단기예보 API 사용 
+- @지역(시,군,구...), @날짜, @시간 필요
 
 ---
 transition: slide-up
-page: 3
+page: 4
 ---
-# 의도 분석 내용
+# 의도 분석 방법
 
-### 시간
-- 1~24시
-- 한시~이십사시 (영시)
-- 한시~스물네시 (빵시)
+### ES 색인
+- 노리 사전에 필요한 개체명 사전 등록  ex) 서울시, 강남, 강서구, 오늘, 내일, 한시 등등 
+- ES index 에 의도 <-> 유사질의 쌍 색인
+```json
+{
+    "intent" : "날씨 > 다음주",
+    "sentences" : [
+      {
+        "text" : "다음주 날씨"
+      },
+      {
+        "text" : "다음주 날씨 알려줘"
+      },
+      {
+        "text" : "다음주 날씨 어때"
+      }, 
+      ...
+```
 
-### 시간대
-- 아침, 점심, 저녁
-- 오전, 오후
-- AM, PM
+---
+transition: slide-up
+page: 5
+---
+# 의도 분석 방법
 
+### ES 질의
+- 사용자 질의 형태소 분석 후, 등록된 유사질의를 만족하는 의도 검색
+- "강남 날씨 내일은 어때?" -> "강남", "**날씨**", "**내일**", "은", "**어떻**", "**어**"
+```json
+{
+  "intent": "날씨 > 내일",
+  "sentences": [
+    >> {"text": "내일 날씨 어때?"},
+    {"text": "내일 날씨가 어떻지?"},
+    {"text": "내일 날씨 알려줘."}
+  ... 
+```
 
+---
+transition: slide-up
+page: 6
+---
+# 엔티티 추출 방법
+
+### 엔티티 추출
+- 형태소 분석 -> 명사추출 후 기 정의된 태그들과 매칭
+  - @timePre : 오전,오후,AM,PM,자정,정오 ..
+  - @time : 0시~24시, 영시~스물네시, 십삼시~이십삼시 .. 
+  - @si : 서울시.. @gu : 강남구, 강남, 역삼 .., @dong : 역삼동, 역삼1동, 역삼2동 ..
+
+<br>
+
+- 서울시 강남의 내일 오전 날씨는
+```json
+{
+  "parsedEntity": {
+    "@time": ["12시"],
+    "@si": ["서울시"],
+    "@gu": ["강남"],
+    "@time_pre": ["오전"]
+  }
+}
+```
+
+---
+transition: slide-up
+page: 7
+---
+# 한계점
+
+### 주요 키워드 중복 시, 의도 파악 난해
+- "나는 오늘 인천인데 내일 서울의 날씨는 어때?"
+  - 의도 분석
+    - 검색된 의도 : 날씨 > 오늘, 날씨> 내일
+    - 실제 의도 : 내일의 서울 날씨
+  - 개체명 선택
+    - 인천, 서울 중 지역 선택이 애매함
+    - 대화엔진 API 연동 사용 시, 다중 개체명값 처리 방식
 
 ---
 transition: fade-out
-page: 4
+page: 8
+---
+# Slackbot
+[https://api.slack.com](https://api.slack.com) 의 **`Your Apps`** 메뉴 참조
+
+---
+transition: slide-up
+page: 9
 ---
 # 의도 요청 API
 Typescript 라서 node.js 의 기본 api 중 `fetch` 사용
 
-```ts {0|3|all}
+```ts {0|4|5|all}
 // src/load.ts
 export async function intent(sentence: string) {
-  return await fetch(`.../intent/query?sentence=${encodeURIComponent(sentence)}`)
+  const urlEncoded = encodeURIComponent(sentence)
+  return await fetch('.../intent/query'
+    + `?sentence=${urlEncoded}`
+  )
   .then(resp => resp.json())
 }
 ```
 
 <span v-mark.underline.orange>`"내일 저녁에 부평에서 축구할거야"`</span> 라는 문장의 결과는 
-```json {0|8|8-10|4-5|6|all}
+```json {0|8|8-10|4-5|6-7|all}
 {
   "responseTime": 8,
   "intentId": "2",
@@ -89,12 +168,12 @@ export async function intent(sentence: string) {
 transition: fade-out
 layout: image-right
 image: https://dev.ccaas.langsa.ai/slack.png
-page: 5
+page: 9
 ---
 # 꼴
 
 Slack bot(Slash Commands)로 <span v-mark.underline.blue>`/날씨 쫑알쫑알`</span> 하면 <span v-mark.circle.red>`https://.../weather`</span> 로 요청
-```ts {5-9|all}
+```ts {0|5-9|all}
 app.use('/weather', async (req, res) => {
   const {user_id: cacheKey, text} = req.body
   const intented: Intent = await intent(text)
@@ -116,6 +195,6 @@ app.use('/weather', async (req, res) => {
 ---
 transition: fade-out
 layout: center
-page: 6
+page: 10
 ---
 # 끝
